@@ -7,6 +7,20 @@
 #include <SD.h>
 #include "FS.h"
 #include <SPI.h>
+#include "WORDS.h"
+
+#include <TimeLib.h>
+#include <NtpClientLib.h>
+
+#define YOUR_WIFI_SSID "DestructionDynamics"
+#define YOUR_WIFI_PASSWD "CealiNimbus"
+
+int8_t timeZone = -5;
+int8_t minutesTimeZone = 0;
+bool wifiFirstConnected = false;
+
+boolean syncEventTriggered = false; // True if a time even has been triggered
+NTPSyncEvent_t ntpEvent; // Last triggered event
 
 
 
@@ -17,7 +31,22 @@ Adafruit_HX8357 tft = Adafruit_HX8357(TFT_CS, TFT_DC, -1);
 
 #define SD_CS 5
 
+boolean on = false;
+
 int i = 0;
+unsigned int strLength = 0;
+
+//either use method below or check the ntc server once when turned on -> establishes day it is, use timers from there
+// Write Yesterday to SD card in case it is turned off. SD file is day.txt, at on, check day to see what yesterday was, on day change delete file and re-write with new yesterday
+int yesterday = 0;
+int dailyCounter = 0;
+
+char buf[12];
+
+#define BUFFPIXEL 75
+
+int dayOfYear = 0;
+
 
 void setup() {
 
@@ -41,28 +70,56 @@ void setup() {
   tft.fillScreen(HX8357_YELLOW);
   Serial.println("OK!");
 
-    tft.setRotation(1);
-    tft.setCursor(280, 260);
-    tft.setTextColor(HX8357_WHITE);  tft.setTextSize(3);
-    tft.println("LOADING");
-    tft.setRotation(0);
-    delay(500);
-    tft.fillScreen(HX8357_BLACK);
+  tft.setRotation(1);
+  tft.setCursor(280, 260);
+  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(3);
+  tft.println("LOADING");
+  tft.setRotation(0);
+  delay(500);
+  tft.fillScreen(HX8357_BLACK);
 
-    
   loading();
-
   
+
+  WiFi.mode (WIFI_STA);
+  WiFi.begin (YOUR_WIFI_SSID, YOUR_WIFI_PASSWD);
+  delay(50);
+  NTP.onNTPSyncEvent ([](NTPSyncEvent_t event) {
+      ntpEvent = event;
+      syncEventTriggered = true;
+  });
+
+  WiFi.onEvent (onEvent);
   
 }
 
 void loop() {
-  tft.fillScreen(HX8357_BLACK);
+    static int i = 0;
+    static int last = 0;
 
+    if (wifiFirstConnected) {
+        wifiFirstConnected = false;
+        NTP.begin ("pool.ntp.org", timeZone, true, minutesTimeZone);
+        NTP.setInterval (86400);
+    }
+
+    if (syncEventTriggered) {
+        processSyncEvent (ntpEvent);
+        syncEventTriggered = false;
+    }
+
+    if(on){
+      on = false;
+      daily();
+      }
+
+  delay(0);
 }
 
 
-#define BUFFPIXEL 75
+
+
+
 
 void bmpDraw(char *filename, uint8_t x, uint16_t y) {
 
@@ -194,11 +251,169 @@ uint32_t read32(File &f) {
   return result;
 }
 
+
+
 void loading(){
   for(int i=0;i<1;i++){
     bmpDraw("/TTV.bmp",0,0);
     bmpDraw("/TTV2.bmp",0,0);
     bmpDraw("/TTV3.bmp",0,0);
   }
+  tft.fillScreen(HX8357_BLACK);
 }
+
+void daily(){
+  dailyCounter = dayOfTheYear();
+  Serial.print("It's day ");
+  Serial.println(dailyCounter);
+  tft.fillScreen(0xFD11);
+  tft.setRotation(1);
+  tft.setCursor(90, 100);
+  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(3);
+  tft.println(words[dailyCounter]);
+  tft.setRotation(0);  
+}
+
+
+
+int dayOfTheYear(){
+  String date = NTP.getDateStr (NTP.getLastNTPSync ());
+  date.toCharArray(buf, 12); // 0,1 3,4
+
+  if(buf[0]-48 == 1){
+    dayOfYear = dayOfYear + 10;
+  }
+  else if(buf[0]-48 == 2){
+    dayOfYear = dayOfYear + 20;
+  }
+  else if(buf[0]-48 == 3){
+    dayOfYear = dayOfYear + 30;
+  }
+
+  if(buf[1]-48 == 0){
+    yield();
+  }
+  else if( buf[1]-48 == 1){
+    dayOfYear = dayOfYear + 1;
+  }
+  else if( buf[1]-48 == 2){
+    dayOfYear = dayOfYear + 2;
+  }
+  else if( buf[1]-48 == 3){
+    dayOfYear = dayOfYear + 3;
+  }
+  else if( buf[1]-48 == 4){
+    dayOfYear = dayOfYear + 4;
+  }
+  else if( buf[1]-48 == 5){
+    dayOfYear = dayOfYear + 5;
+  }
+  else if( buf[1]-48 == 6){
+    dayOfYear = dayOfYear + 6;
+  }
+  else if( buf[1]-48 == 7){
+    dayOfYear = dayOfYear + 7;
+  }
+  else if( buf[1]-48 == 8){
+    dayOfYear = dayOfYear + 8;
+  }
+  else if( buf[1]-48 == 9){
+    dayOfYear = dayOfYear + 9;
+  }
+
+  if(buf[3]-48 == 0){
+    if(buf[4]-48 == 0){
+      yield();      
+    }
+    else if(buf[4]-48 == 1){
+      yield();
+    }
+    else if(buf[4]-48 == 2){
+      dayOfYear = dayOfYear +31;
+    }
+    else if(buf[4]-48 == 3){
+      dayOfYear = dayOfYear +59;
+    }
+    else if(buf[4]-48 == 4){
+      dayOfYear = dayOfYear +90;
+    }
+    else if(buf[4]-48 == 5){
+      dayOfYear = dayOfYear +120;
+    }
+    else if(buf[4]-48 == 6){
+      dayOfYear = dayOfYear +151;
+    }
+    else if(buf[4]-48 == 7){
+      dayOfYear = dayOfYear +181;
+    }
+    else if(buf[4]-48 == 8){
+      dayOfYear = dayOfYear +212;
+    }
+    else if(buf[4]-48 == 9){
+      dayOfYear = dayOfYear +243;
+    }
+  }
+  else if(buf[3]-48==1){
+    if(buf[4]-48 == 0){
+      dayOfYear = dayOfYear + 273;      
+    }
+    else if(buf[4]-48 == 1){
+      dayOfYear = dayOfYear +304;
+    }
+    else if(buf[4]-48 == 2){
+      dayOfYear = dayOfYear +334;
+    }
+  }
+
+  
+  if(dayOfYear == 0){
+    dayOfYear++;
+  }
+  
+  if(dayOfYear > 365){
+    dayOfYear = 365;
+  }
+
+  return dayOfYear; 
+}
+
+
+
+void onEvent (system_event_id_t event, system_event_info_t info) {
+    Serial.printf ("[WiFi-event] event: %d\n", event);
+
+    switch (event) {
+    case SYSTEM_EVENT_STA_CONNECTED:
+        Serial.printf ("Connected to %s\r\n", info.connected.ssid);
+        break;
+    case SYSTEM_EVENT_STA_GOT_IP:
+        Serial.printf ("Got IP: %s\r\n", IPAddress (info.got_ip.ip_info.ip.addr).toString ().c_str ());
+        Serial.printf ("Connected: %s\r\n", WiFi.status () == WL_CONNECTED ? "yes" : "no");
+        wifiFirstConnected = true;
+        break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        Serial.printf ("Disconnected from SSID: %s\n", info.disconnected.ssid);
+        Serial.printf ("Reason: %d\n", info.disconnected.reason);
+        //NTP.stop(); // NTP sync can be disabled to avoid sync errors
+        break;
+    }
+}
+
+void processSyncEvent (NTPSyncEvent_t ntpEvent) {
+    if (ntpEvent) {
+        Serial.print ("Time Sync error: ");
+        if (ntpEvent == noResponse)
+            Serial.println ("NTP server not reachable");
+        else if (ntpEvent == invalidAddress)
+            Serial.println ("Invalid NTP server address");
+    } else {
+        Serial.print ("Got NTP time: ");
+        Serial.println (NTP.getTimeDateString (NTP.getLastNTPSync ()));
+        on = true;
+    }
+}
+
+
+
+
 
