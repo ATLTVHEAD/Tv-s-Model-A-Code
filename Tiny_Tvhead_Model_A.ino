@@ -1,23 +1,24 @@
+#include "FS.h"
 #include <Adafruit_HX8357.h>
 #include <Adafruit_GFX.h>
 #include <Bounce2.h>
 #include <WiFi.h>
 #include <IRCClient.h>
 #include <DNSServer.h>
+#include <WebServer.h>
+#include <WiFiManager.h>
 #include <SD.h>
-#include "FS.h"
+
 #include <SPI.h>
 #include "WORDS.h"
 
 #include <TimeLib.h>
 #include <NtpClientLib.h>
 
-#define YOUR_WIFI_SSID "DestructionDynamics"
-#define YOUR_WIFI_PASSWD "CealiNimbus"
 
 int8_t timeZone = -5;
 int8_t minutesTimeZone = 0;
-bool wifiFirstConnected = false;
+bool wifiFirstConnected = true;
 
 boolean syncEventTriggered = false; // True if a time even has been triggered
 NTPSyncEvent_t ntpEvent; // Last triggered event
@@ -36,8 +37,7 @@ boolean on = false;
 int i = 0;
 unsigned int strLength = 0;
 
-//either use method below or check the ntc server once when turned on -> establishes day it is, use timers from there
-// Write Yesterday to SD card in case it is turned off. SD file is day.txt, at on, check day to see what yesterday was, on day change delete file and re-write with new yesterday
+
 int yesterday = 0;
 int dailyCounter = 0;
 
@@ -56,6 +56,30 @@ void setup() {
   tft.begin(HX8357D);
   tft.fillScreen(HX8357_BLACK);
 
+
+  tft.setRotation(1);
+  tft.setCursor(90, 100);
+  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(7);
+  tft.print("M");
+  delay(100);
+  tft.print("O");
+  delay(100);
+  tft.print("D");
+  delay(100);
+  tft.print("E");
+  delay(100);
+  tft.print("L ");
+  delay(200);
+  tft.print("A");
+  tft.setRotation(0);
+  delay(750);
+  tft.setRotation(1);
+  tft.setCursor(260, 260);
+  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(3);
+  tft.println("LOADING");
+
+
+
   Serial.print("Initializing SD card...");
   while(!SD.begin(SD_CS)) {
     Serial.print("failed! ");
@@ -67,30 +91,27 @@ void setup() {
     i++;
   }
   
-  tft.fillScreen(HX8357_YELLOW);
-  Serial.println("OK!");
 
-  tft.setRotation(1);
-  tft.setCursor(280, 260);
-  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(3);
-  tft.println("LOADING");
+  WiFiManager wifiManager;
+  wifiManager.setTimeout(180);
+  if(!wifiManager.autoConnect("AutoConnectAP")) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+    //reset and try again, or maybe put it to deep sleep
+    ESP.restart();
+    delay(5000);
+  } 
+
   tft.setRotation(0);
-  delay(500);
-  tft.fillScreen(HX8357_BLACK);
+  tft.fillScreen(HX8357_YELLOW);
 
-  loading();
-  
-
-  WiFi.mode (WIFI_STA);
-  WiFi.begin (YOUR_WIFI_SSID, YOUR_WIFI_PASSWD);
-  delay(50);
   NTP.onNTPSyncEvent ([](NTPSyncEvent_t event) {
       ntpEvent = event;
       syncEventTriggered = true;
   });
 
-  WiFi.onEvent (onEvent);
   
+  loading();
 }
 
 void loop() {
@@ -113,7 +134,7 @@ void loop() {
       daily();
       }
 
-  delay(0);
+  yield();
 }
 
 
@@ -269,7 +290,7 @@ void daily(){
   tft.fillScreen(0xFD11);
   tft.setRotation(1);
   tft.setCursor(90, 100);
-  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(3);
+  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(4);
   tft.println(words[dailyCounter]);
   tft.setRotation(0);  
 }
@@ -379,25 +400,6 @@ int dayOfTheYear(){
 
 
 
-void onEvent (system_event_id_t event, system_event_info_t info) {
-    Serial.printf ("[WiFi-event] event: %d\n", event);
-
-    switch (event) {
-    case SYSTEM_EVENT_STA_CONNECTED:
-        Serial.printf ("Connected to %s\r\n", info.connected.ssid);
-        break;
-    case SYSTEM_EVENT_STA_GOT_IP:
-        Serial.printf ("Got IP: %s\r\n", IPAddress (info.got_ip.ip_info.ip.addr).toString ().c_str ());
-        Serial.printf ("Connected: %s\r\n", WiFi.status () == WL_CONNECTED ? "yes" : "no");
-        wifiFirstConnected = true;
-        break;
-    case SYSTEM_EVENT_STA_DISCONNECTED:
-        Serial.printf ("Disconnected from SSID: %s\n", info.disconnected.ssid);
-        Serial.printf ("Reason: %d\n", info.disconnected.reason);
-        //NTP.stop(); // NTP sync can be disabled to avoid sync errors
-        break;
-    }
-}
 
 void processSyncEvent (NTPSyncEvent_t ntpEvent) {
     if (ntpEvent) {
