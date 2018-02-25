@@ -8,14 +8,13 @@
 #include <WebServer.h>
 #include <WiFiManager.h>
 #include <SD.h>
-
 #include <SPI.h>
 #include "WORDS.h"
-
 #include <TimeLib.h>
 #include <NtpClientLib.h>
+#include <math.h>
 
-
+// for time zone calculations and setting up the NTP
 int8_t timeZone = -5;
 int8_t minutesTimeZone = 0;
 bool wifiFirstConnected = true;
@@ -24,28 +23,36 @@ boolean syncEventTriggered = false; // True if a time even has been triggered
 NTPSyncEvent_t ntpEvent; // Last triggered event
 
 
-
+//For setting up the tft and sd card 
 #define TFT_DC 16
 #define TFT_CS 17
 // Use hardware SPI (on Uno, #13, #12, #11) and the above for CS/DC
 Adafruit_HX8357 tft = Adafruit_HX8357(TFT_CS, TFT_DC, -1);
-
+#define BUFFPIXEL 75
 #define SD_CS 5
 
-boolean on = false;
+// bool for the word of the day
+boolean firstOn = false;
 
+//clock variables and bool for triggering the clock in the main loop - replace with encoder
 int i = 0;
 unsigned int strLength = 0;
-
-
-int yesterday = 0;
-int dailyCounter = 0;
-
+//int yesterday = 0;
+//int dailyCounter = 0;
 char buf[12];
+boolean clockOn = true;
 
-#define BUFFPIXEL 75
+// used for random x,y, values to give the words and time a little motion 
+int rx = 0;
+int ry = 0;
 
-int dayOfYear = 0;
+//setup for the vintage circles 
+boolean vcOn = true;
+uint16_t v=0;
+uint16_t xtrans=240;
+uint16_t ytrans=160;
+int eq = 2; // -> get's set when encoder triggers
+
 
 
 void setup() {
@@ -77,6 +84,9 @@ void setup() {
   tft.setCursor(260, 260);
   tft.setTextColor(HX8357_WHITE);  tft.setTextSize(3);
   tft.println("LOADING");
+  tft.setTextSize(2);
+  tft.setCursor(180, 180);
+  tft.println("SERIAL A01");
 
 
 
@@ -102,8 +112,10 @@ void setup() {
     delay(5000);
   } 
 
-  tft.setRotation(0);
+
+  tft.setRotation(0); 
   tft.fillScreen(HX8357_YELLOW);
+
 
   NTP.onNTPSyncEvent ([](NTPSyncEvent_t event) {
       ntpEvent = event;
@@ -121,7 +133,7 @@ void loop() {
     if (wifiFirstConnected) {
         wifiFirstConnected = false;
         NTP.begin ("pool.ntp.org", timeZone, true, minutesTimeZone);
-        NTP.setInterval (86400);
+        NTP.setInterval (3600);
     }
 
     if (syncEventTriggered) {
@@ -129,10 +141,19 @@ void loop() {
         syncEventTriggered = false;
     }
 
-    if(on){
-      on = false;
+    if(firstOn){
+      firstOn = false;
       daily();
+      delay(5000);
+      clockOn = true;
+      vcOn = true;
       }
+    else{
+      //Clock();
+      vintageCircles();
+      
+    }
+      
 
   yield();
 }
@@ -284,21 +305,24 @@ void loading(){
 }
 
 void daily(){
-  dailyCounter = dayOfTheYear();
-  Serial.print("It's day ");
-  Serial.println(dailyCounter);
+  //Serial.print("Day ");
+  //Serial.print(dailyCounter);
+  //Serial.println(" 72 Hours Remain");
   tft.fillScreen(0xFD11);
   tft.setRotation(1);
-  tft.setCursor(90, 100);
+  rx = random(1,6)*10;
+  ry = random(1,6)*10;
+  tft.setCursor(90+rx, 100+ry);
   tft.setTextColor(HX8357_WHITE);  tft.setTextSize(4);
-  tft.println(words[dailyCounter]);
+  tft.println(words[dayOfTheYear()]);
   tft.setRotation(0);  
 }
 
 
 
 int dayOfTheYear(){
-  String date = NTP.getDateStr (NTP.getLastNTPSync ());
+  int dayOfYear = 0;
+  String date = NTP.getDateStr(NTP.getLastNTPSync());
   date.toCharArray(buf, 12); // 0,1 3,4
 
   if(buf[0]-48 == 1){
@@ -400,6 +424,52 @@ int dayOfTheYear(){
 
 
 
+void Clock(){
+  String TIME = NTP.getTimeStr();
+  TIME.remove(5);
+    static int i = 0;
+    static int last = 0;
+  rx = random(1,6)*10;
+  ry = random(1,6)*10;
+  
+  if(clockOn){
+    tft.setRotation(1);
+    tft.setCursor(80+rx, 110+ry);
+    tft.setTextColor(HX8357_WHITE);  tft.setTextSize(8);
+    tft.fillScreen(0x8F3F);
+    tft.println(TIME);
+    clockOn = false;
+  }
+  
+  if ((millis () - last) > 10100) {
+    tft.setRotation(1);
+    tft.setCursor(80+rx, 110+ry);
+    tft.setTextColor(HX8357_WHITE);  tft.setTextSize(8);
+    tft.fillScreen(0x8F3F);
+  
+        //Serial.println(millis() - last);
+        last = millis ();
+        //Serial.print (i); Serial.print (" ");
+        tft.println (TIME);
+        // Serial.print (" ");
+        //Serial.print (NTP.isSummerTime () ? "Summer Time. " : "Winter Time. ");
+        //Serial.print ("WiFi is ");
+        //Serial.print (WiFi.isConnected () ? "connected" : "not connected"); Serial.print (". ");
+        //Serial.print ("Uptime: ");
+        //Serial.print (NTP.getUptimeString()); Serial.print (" since ");
+        //Serial.println (NTP.getTimeDateString (NTP.getFirstSync ()).c_str ());
+
+        i++;
+      if(i >= 12){
+        firstOn = true;
+        i = 0;
+      }
+    }
+  tft.setRotation(0);    
+}
+
+
+
 
 void processSyncEvent (NTPSyncEvent_t ntpEvent) {
     if (ntpEvent) {
@@ -411,11 +481,90 @@ void processSyncEvent (NTPSyncEvent_t ntpEvent) {
     } else {
         Serial.print ("Got NTP time: ");
         Serial.println (NTP.getTimeDateString (NTP.getLastNTPSync ()));
-        on = true;
+        firstOn = true;
     }
 }
 
 
 
+void vintageCircles(){
+  if(vcOn){
+    vcOn = false;
+    v=0;
+    tft.setRotation(1);
+    tft.fillScreen(HX8357_BLACK);
+    tft.setCursor(0,0);
+    tft.setTextColor(HX8357_WHITE);  tft.setTextSize(2);
+    tft.println("EQUATION Visualizations");
+    eqText();
+    tft.setRotation(0);
 
+  }
+  
+
+  tft.drawPixel(yv(v)+ytrans,xv(v)+xtrans,HX8357_WHITE);
+  
+  if(v==1200){
+    tft.setRotation(1);
+    tft.drawRect(180,310, 350, 20, HX8357_BLACK);
+    tft.fillRect(180,310, 350, 20, HX8357_BLACK);
+    tft.setRotation(0);
+  }
+  else if(v == 800){
+    tft.setRotation(1);
+    tft.drawRect(0,0, 400, 20, HX8357_BLACK);
+    tft.fillRect(0,0, 400, 20, HX8357_BLACK);
+    tft.setRotation(0);
+  }
+  delay(1);
+  v++;
+}
+
+uint16_t xv(uint16_t t){
+  if(eq==0){
+    // change that 250 variable
+    return sin(t/10)*100 + sin(t/15)*250; // + sin(t*10)*100;
+  }
+  else if(eq==1){
+    //change the 13 in the last sin variable
+    return sin(t/10)*100 + sin(t/13)*40;
+  }
+  else if(eq==2){
+    return sin(t*5/2)*300;
+  }
+  //sin(t/15)*100
+  //return sin(t/10)*100 * sin(t/3)*100;
+}
+
+uint16_t yv(uint16_t t){
+  if(eq==0){
+    return cos(t/10)*100;
+  }
+  else if(eq==1){
+    return cos(t/10)*100 + sin(t)*40;
+  }
+  else if(eq==2){
+    return log(t)*5-50;
+  }
+   //sin(t*2)*100;
+  //return cos(t/10)*100;
+}
+
+void eqText(){
+  tft.setRotation(1);
+  tft.setCursor(180,310); tft.setTextSize(1);
+  if(eq==0){
+    tft.println("x=cos(t/10)*100    y=sin(t/10)*100 + sin(t/15)*250");
+  }
+  else if(eq==1){
+    tft.println("x=cos(t/10)*100 + sin(t)*40    y=sin(t/10)*100 + sin(t/13)*40");
+  }
+  else if(eq==2){
+    tft.println("x=cos(t/10)*100    y=sin(t/10)*100 + sin(t*10)*100");
+  }
+  else{
+    tft.println("x=log(t)*5-50    y=sin(t*5/2)*300");
+  }
+  tft.setRotation(0);
+}
 
