@@ -13,6 +13,7 @@
 #include <TimeLib.h>
 #include <NtpClientLib.h>
 #include <math.h>
+#include <rom/gpio.h>
 
 // for time zone calculations and setting up the NTP
 int8_t timeZone = -5;
@@ -54,10 +55,40 @@ uint16_t ytrans=160;
 int eq = 2; // -> get's set when encoder triggers
 
 
+//setup for enocoder values
+const byte ENC_A = 14;
+const byte ENC_B = 27;
+int8_t tmpdata;
+boolean bState = 0;
+const byte bPin = 26;
+volatile int interruptCounter = 0;
+int numberOfInterrupts = 0;
+
+Bounce bouncer = Bounce();  // Setting up the debounce function to the button and calling the output bouncer
+//portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+
+
+// had to place this function before setup for the interrupt handling 
+//void IRAM_ATTR handleInterrupt() {
+  //portENTER_CRITICAL_ISR(&mux);
+  //interruptCounter++;
+  //portEXIT_CRITICAL_ISR(&mux);
+//}
+
+
+
 
 void setup() {
 
   pinMode(19,INPUT_PULLUP);
+  pinMode(ENC_A, INPUT_PULLUP); 
+  pinMode(ENC_B, INPUT_PULLUP);
+  pinMode(bPin, INPUT_PULLUP);
+  //attachInterrupt(digitalPinToInterrupt(bPin), handleInterrupt, FALLING);
+  bouncer.attach(bPin);
+  bouncer.interval(5); // interval in ms
+
+  
   Serial.begin(115200);
 
   tft.begin(HX8357D);
@@ -129,6 +160,25 @@ void setup() {
 void loop() {
     static int i = 0;
     static int last = 0;
+    static uint8_t counter = 0;
+
+    tmpdata = read_encoder(); 
+    if( tmpdata ) { 
+      Serial.print("Counter value: "); 
+      Serial.println(counter, DEC); 
+      counter += tmpdata; 
+     }
+
+   //if(interruptCounter>0){
+ 
+     // portENTER_CRITICAL(&mux);
+     // interruptCounter--;
+     // portEXIT_CRITICAL(&mux);
+      // This is where I should do the button pressing switching the boolean 
+     // numberOfInterrupts++;
+     // Serial.print("An interrupt has occurred. Total: ");
+      //Serial.println(numberOfInterrupts);
+  //}
 
     if (wifiFirstConnected) {
         wifiFirstConnected = false;
@@ -141,23 +191,51 @@ void loop() {
         syncEventTriggered = false;
     }
 
-    if(firstOn){
+  if(firstOn){
       firstOn = false;
       daily();
       delay(5000);
       clockOn = true;
       vcOn = true;
-      }
-    else{
+    }
+  else{
       //Clock();
       vintageCircles();
       
     }
+
+  if ( bouncer.update()) {
+     if ( bouncer.read() == HIGH) {
+      //state change here
+      bState=!bState;
+      Serial.println(bState);      
+     }
+   } 
       
 
   yield();
 }
 
+
+int8_t read_encoder() 
+{ 
+ static int8_t enc_states[] = {0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0}; 
+ static uint8_t old_AB = 0; 
+ static uint32_t curval = 0; 
+ /**/ 
+ old_AB <<= 2;                   //remember previous state 
+ //bit shift old_AB two positions to the left and store. 
+curval = gpio_input_get(); 
+ // returns gpio pin status of pins - SEE DEFINE or gpio.h  
+ //note to self: these curval bits are probably backwards... 
+old_AB |= ( ( (curval & 1<< ENC_A ) >> ENC_A  | (curval & 1<< ENC_B ) >> (ENC_B - 1) ) & 0x03 );  
+ //add current state and hopefully truncate to 8bit  
+return ( enc_states[( old_AB & 0x0f )]); 
+ // return the array item that matches the known possible encoder states 
+ // Thanks to kolban in the esp32 channel, who has many great books on iot, 
+ // for his initial help at my panic on the esp32 gpio access.
+ // long live IRC :) 
+}  
 
 
 
