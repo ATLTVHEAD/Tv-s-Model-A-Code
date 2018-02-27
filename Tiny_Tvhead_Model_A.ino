@@ -38,10 +38,9 @@ boolean firstOn = false;
 //clock variables and bool for triggering the clock in the main loop - replace with encoder
 int i = 0;
 unsigned int strLength = 0;
-//int yesterday = 0;
-//int dailyCounter = 0;
 char buf[12];
 boolean clockOn = true;
+int last = 0;
 
 // used for random x,y, values to give the words and time a little motion 
 int rx = 0;
@@ -52,8 +51,8 @@ boolean vcOn = true;
 uint16_t v=0;
 uint16_t xtrans=240;
 uint16_t ytrans=160;
-int eq = 2; // -> get's set when encoder triggers
-
+int eq = 0; // -> get's set when encoder triggers
+int CurrentEQNumber = 0;
 
 //setup for enocoder values
 const byte ENC_A = 14;
@@ -61,19 +60,20 @@ const byte ENC_B = 27;
 int8_t tmpdata;
 boolean bState = 0;
 const byte bPin = 26;
-volatile int interruptCounter = 0;
-int numberOfInterrupts = 0;
+int oldCounter = 0;
+int CurrentPatternNumber = 0; // Index number of which pattern is current
+uint8_t quadCounter = 0;
+uint8_t channel = 0;
+uint8_t oldChannel = 0;
+bool dir =true;
+bool forward = true;
+bool back = false;
+int counter = 0;
+
+
 
 Bounce bouncer = Bounce();  // Setting up the debounce function to the button and calling the output bouncer
-//portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-
-// had to place this function before setup for the interrupt handling 
-//void IRAM_ATTR handleInterrupt() {
-  //portENTER_CRITICAL_ISR(&mux);
-  //interruptCounter++;
-  //portEXIT_CRITICAL_ISR(&mux);
-//}
 
 
 
@@ -84,7 +84,6 @@ void setup() {
   pinMode(ENC_A, INPUT_PULLUP); 
   pinMode(ENC_B, INPUT_PULLUP);
   pinMode(bPin, INPUT_PULLUP);
-  //attachInterrupt(digitalPinToInterrupt(bPin), handleInterrupt, FALLING);
   bouncer.attach(bPin);
   bouncer.interval(5); // interval in ms
 
@@ -98,17 +97,7 @@ void setup() {
   tft.setRotation(1);
   tft.setCursor(90, 100);
   tft.setTextColor(HX8357_WHITE);  tft.setTextSize(7);
-  tft.print("M");
-  delay(100);
-  tft.print("O");
-  delay(100);
-  tft.print("D");
-  delay(100);
-  tft.print("E");
-  delay(100);
-  tft.print("L ");
-  delay(200);
-  tft.print("A");
+  tft.print("M"); delay(100); tft.print("O"); delay(100); tft.print("D"); delay(100); tft.print("E"); delay(100); tft.print("L "); delay(200); tft.print("A");
   tft.setRotation(0);
   delay(750);
   tft.setRotation(1);
@@ -118,7 +107,6 @@ void setup() {
   tft.setTextSize(2);
   tft.setCursor(180, 180);
   tft.println("SERIAL A01");
-
 
 
   Serial.print("Initializing SD card...");
@@ -135,7 +123,7 @@ void setup() {
 
   WiFiManager wifiManager;
   wifiManager.setTimeout(180);
-  if(!wifiManager.autoConnect("AutoConnectAP")) {
+  if(!wifiManager.autoConnect("Model A01")) {
     Serial.println("failed to connect and hit timeout");
     delay(3000);
     //reset and try again, or maybe put it to deep sleep
@@ -153,32 +141,21 @@ void setup() {
       syncEventTriggered = true;
   });
 
-  
   loading();
 }
 
 void loop() {
     static int i = 0;
     static int last = 0;
-    static uint8_t counter = 0;
+
 
     tmpdata = read_encoder(); 
     if( tmpdata ) { 
-      Serial.print("Counter value: "); 
-      Serial.println(counter, DEC); 
+      //Serial.print("Counter value: "); 
+      //Serial.println(counter, DEC); 
       counter += tmpdata; 
      }
-
-   //if(interruptCounter>0){
- 
-     // portENTER_CRITICAL(&mux);
-     // interruptCounter--;
-     // portEXIT_CRITICAL(&mux);
-      // This is where I should do the button pressing switching the boolean 
-     // numberOfInterrupts++;
-     // Serial.print("An interrupt has occurred. Total: ");
-      //Serial.println(numberOfInterrupts);
-  //}
+     //Serial.print("inloop ");Serial.println(counter);
 
     if (wifiFirstConnected) {
         wifiFirstConnected = false;
@@ -191,28 +168,91 @@ void loop() {
         syncEventTriggered = false;
     }
 
-  if(firstOn){
-      firstOn = false;
+
+  
+
+  dir = setDir();
+  channel = setChannel();
+
+  if(channel == 0){
       daily();
-      delay(5000);
-      clockOn = true;
-      vcOn = true;
     }
-  else{
-      //Clock();
-      vintageCircles();
-      
-    }
+  else if(channel == 1){
+     Clock();
+  }
+  else if(channel == 2){
+    vintageCircles(0);
+  }
+  else if(channel == 3){
+    vintageCircles(1);
+  }
+  else if(channel == 4){
+    vintageCircles(2);
+  }
+  
+  
 
   if ( bouncer.update()) {
      if ( bouncer.read() == HIGH) {
       //state change here
       bState=!bState;
-      Serial.println(bState);      
+      //Serial.println(bState);      
      }
    } 
-      
+  oldChannel = channel;
+  oldCounter = counter;
+  yield();
+}
 
+
+
+bool setDir(){
+    if(counter > oldCounter){
+    return forward;
+  }
+  else if (counter < oldCounter){
+    return back;
+  }
+}
+
+
+
+int setChannel(){
+  // -> Trying to figure out how to make code activate only on encoder clicks/divisible by 4.    
+  if (abs(counter)%4 ==0 && counter!=oldCounter && bState == true && dir ==true && CurrentPatternNumber < 5){
+      CurrentPatternNumber++;
+      clockOn=true;
+      vcOn=true;
+    }
+  else if(abs(counter)%4 ==0 && counter!=oldCounter && bState == true && dir ==false && CurrentPatternNumber > 0){
+      CurrentPatternNumber--;
+      clockOn=true;
+      vcOn=true;
+    }
+  return CurrentPatternNumber;
+}
+
+int setEquation(){
+  // -> Trying to figure out how to make code activate only on encoder clicks/divisible by 4.    
+  if (abs(counter)%4 ==0 && counter!=oldCounter && bState == false && dir ==true && CurrentEQNumber < 9){
+      CurrentEQNumber++;
+      clockOn=true;
+      vcOn=true;
+    }
+  else if(abs(counter)%4 ==0 && counter!=oldCounter && bState == false && dir ==false && CurrentEQNumber > 0){
+      CurrentEQNumber--;
+      clockOn=true;
+      vcOn=true;
+    }
+    if(CurrentEQNumber == 0){
+      CurrentEQNumber=1;
+    }
+  return CurrentEQNumber;
+}
+
+
+
+void Demo(){
   yield();
 }
 
@@ -383,17 +423,27 @@ void loading(){
 }
 
 void daily(){
-  //Serial.print("Day ");
-  //Serial.print(dailyCounter);
-  //Serial.println(" 72 Hours Remain");
-  tft.fillScreen(0xFD11);
-  tft.setRotation(1);
-  rx = random(1,6)*10;
-  ry = random(1,6)*10;
-  tft.setCursor(90+rx, 100+ry);
-  tft.setTextColor(HX8357_WHITE);  tft.setTextSize(4);
-  tft.println(words[dayOfTheYear()]);
-  tft.setRotation(0);  
+  if(firstOn){
+      tft.fillScreen(0xFD11);
+      tft.setRotation(1);
+      rx = random(1,6)*10;
+      ry = random(1,6)*10;
+      tft.setCursor(90+rx, 100+ry);
+      tft.setTextColor(HX8357_WHITE);  tft.setTextSize(4);
+      tft.println(words[dayOfTheYear()]);
+      firstOn = false; 
+      
+    }
+    
+  if ((millis () - last) > 1000) {
+    last = millis ();
+     i++;
+     if(i >= 10){
+         firstOn = true;
+         i = 0;
+       }
+    }
+  tft.setRotation(0);
 }
 
 
@@ -505,8 +555,6 @@ int dayOfTheYear(){
 void Clock(){
   String TIME = NTP.getTimeStr();
   TIME.remove(5);
-    static int i = 0;
-    static int last = 0;
   rx = random(1,6)*10;
   ry = random(1,6)*10;
   
@@ -524,23 +572,12 @@ void Clock(){
     tft.setCursor(80+rx, 110+ry);
     tft.setTextColor(HX8357_WHITE);  tft.setTextSize(8);
     tft.fillScreen(0x8F3F);
-  
-        //Serial.println(millis() - last);
-        last = millis ();
-        //Serial.print (i); Serial.print (" ");
-        tft.println (TIME);
-        // Serial.print (" ");
-        //Serial.print (NTP.isSummerTime () ? "Summer Time. " : "Winter Time. ");
-        //Serial.print ("WiFi is ");
-        //Serial.print (WiFi.isConnected () ? "connected" : "not connected"); Serial.print (". ");
-        //Serial.print ("Uptime: ");
-        //Serial.print (NTP.getUptimeString()); Serial.print (" since ");
-        //Serial.println (NTP.getTimeDateString (NTP.getFirstSync ()).c_str ());
-
-        i++;
-      if(i >= 12){
-        firstOn = true;
-        i = 0;
+    last = millis ();
+    tft.println (TIME);
+    i++;
+    if(i >= 12){
+      firstOn = true;
+      i = 0;
       }
     }
   tft.setRotation(0);    
@@ -565,10 +602,11 @@ void processSyncEvent (NTPSyncEvent_t ntpEvent) {
 
 
 
-void vintageCircles(){
+void vintageCircles(int q){
+  eq = q;
   if(vcOn){
     vcOn = false;
-    v=0;
+    v = 0;
     tft.setRotation(1);
     tft.fillScreen(HX8357_BLACK);
     tft.setCursor(0,0);
@@ -582,13 +620,13 @@ void vintageCircles(){
 
   tft.drawPixel(yv(v)+ytrans,xv(v)+xtrans,HX8357_WHITE);
   
-  if(v==1200){
+  if(v==3000){
     tft.setRotation(1);
-    tft.drawRect(180,310, 350, 20, HX8357_BLACK);
-    tft.fillRect(180,310, 350, 20, HX8357_BLACK);
+    tft.drawRect(40,310, 480, 20, HX8357_BLACK);
+    tft.fillRect(40,310, 480, 20, HX8357_BLACK);
     tft.setRotation(0);
   }
-  else if(v == 800){
+  else if(v == 2000){
     tft.setRotation(1);
     tft.drawRect(0,0, 400, 20, HX8357_BLACK);
     tft.fillRect(0,0, 400, 20, HX8357_BLACK);
@@ -601,14 +639,14 @@ void vintageCircles(){
 uint16_t xv(uint16_t t){
   if(eq==0){
     // change that 250 variable
-    return sin(t/10)*100 + sin(t/15)*250; // + sin(t*10)*100;
+    return sin(t/10)*100 + sin(t/15)*(80*setEquation()); // + sin(t*10)*100;
   }
   else if(eq==1){
     //change the 13 in the last sin variable
-    return sin(t/10)*100 + sin(t/13)*40;
+    return sin(t/10)*100 + sin(t/setEquation()+4)*40;
   }
   else if(eq==2){
-    return sin(t*5/2)*300;
+    return sin(t*5/2)*100*setEquation();
   }
   //sin(t/15)*100
   //return sin(t/10)*100 * sin(t/3)*100;
@@ -630,15 +668,16 @@ uint16_t yv(uint16_t t){
 
 void eqText(){
   tft.setRotation(1);
-  tft.setCursor(180,310); tft.setTextSize(1);
+  tft.setCursor(110,310); tft.setTextSize(1);
   if(eq==0){
-    tft.println("x=cos(t/10)*100    y=sin(t/10)*100 + sin(t/15)*250");
+    tft.println("x=cos(t/10)*100    y=sin(t/10)*100 + sin(t/15)*USER INPUT");
   }
   else if(eq==1){
-    tft.println("x=cos(t/10)*100 + sin(t)*40    y=sin(t/10)*100 + sin(t/13)*40");
+    tft.setCursor(40,310);
+    tft.println("x=cos(t/10)*100 + sin(t)*40    y=sin(t/10)*100 + sin(t/USER INPUT)*40");
   }
   else if(eq==2){
-    tft.println("x=cos(t/10)*100    y=sin(t/10)*100 + sin(t*10)*100");
+    tft.println("x=log(t)*5-50    y=sin(t*5/2)*USER INPUT");
   }
   else{
     tft.println("x=log(t)*5-50    y=sin(t*5/2)*300");
